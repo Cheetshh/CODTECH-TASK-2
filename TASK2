@@ -1,0 +1,64 @@
+from flask import Flask, request, render_template
+import nmap
+import requests
+
+app = Flask(__name__)
+
+def scan_open_ports(target):
+    nm = nmap.PortScanner()
+    nm.scan(target, '1-1024')  # Scanning the first 1024 ports
+
+    open_ports = []
+    for host in nm.all_hosts():
+        for proto in nm[host].all_protocols():
+            lport = nm[host][proto].keys()
+            for port in lport:
+                if nm[host][proto][port]['state'] == 'open':
+                    open_ports.append(port)
+    return open_ports
+
+def check_software_version(url, known_vulnerabilities):
+    try:
+        response = requests.get(url)
+        headers = response.headers
+        server = headers.get('Server')
+        vulnerabilities = []
+        if server:
+            for software, version in known_vulnerabilities.items():
+                if software in server and version in server:
+                    vulnerabilities.append(f"{software} {version}")
+        return vulnerabilities
+    except requests.RequestException:
+        return []
+
+def check_misconfigurations(target):
+    misconfigurations = []
+    try:
+        response = requests.get(target)
+        if response.status_code != 200:
+            misconfigurations.append(f"Unexpected HTTP status: {response.status_code}")
+    except requests.RequestException as e:
+        misconfigurations.append(f"Failed to connect: {e}")
+    return misconfigurations
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/scan', methods=['POST'])
+def scan():
+    target_ip = request.form['target_ip']
+    target_url = request.form['target_url']
+
+    open_ports = scan_open_ports(target_ip)
+    known_vulnerabilities = {
+        'Apache': '2.4.49',
+        'nginx': '1.21.3'
+    }
+    vulnerabilities = check_software_version(target_url, known_vulnerabilities)
+    misconfigurations = check_misconfigurations(target_url)
+
+    return render_template('result.html', open_ports=open_ports, vulnerabilities=vulnerabilities, misconfigurations=misconfigurations)
+
+if __name__ == '__main__':
+    app.run(debug=True)
